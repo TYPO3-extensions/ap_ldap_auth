@@ -3,6 +3,7 @@ namespace AP\ApLdapAuth\Utility;
 
 use AP\ApLdapAuth\Domain\Model\Mapping\FeUsers,
 	AP\ApLdapAuth\Domain\Model\Config;
+use TYPO3\CMS\Core\Utility\GeneralUtility;
 
 /**
  * LDAP auth utility to fetch and create users and groups from LDAP
@@ -148,7 +149,7 @@ class LDAPAuthUtility implements \TYPO3\CMS\Core\SingletonInterface {
 		$typo3UserData = array(
 			'username' => $ldapUser[$usernameAttribute][0],
 			'tx_apldapauth_dn' => $ldapUser['dn'],
-			'pid' => 0, // can be overwritten
+			'pid' => 0,
 			'password' => $password
 		);
 		unset($mappings['pid']);
@@ -156,17 +157,21 @@ class LDAPAuthUtility implements \TYPO3\CMS\Core\SingletonInterface {
 		/** @var $mapping FeUsers */
 		foreach ($mappings as $mapping) {
 			$typo3FieldName = $mapping->getField();
-			$ldapAttribute = $mapping->getAttribute();
-			if (!$mapping->getIsImage()) {
-				// text fields
-				$typo3UserData[$typo3FieldName] = $mapping->getIsAttribute() ? $ldapUser[$ldapAttribute][0] : $mapping->getValue(); // use value of $ldapFieldName if field in $ldapUser doesn't exist
-			} else {
+			$ldapAttribute = strtolower($mapping->getAttribute());
+			$value = $mapping->getIsAttribute() ? $ldapUser[$ldapAttribute][0] : $mapping->getValue();
+			if ($mapping->getIsImage()) {
 				// image
 				$fileName = 'tx_apldapauth_' . md5($typo3UserData['tx_apldapauth_dn']) . '.jpg';
 				$imageFilePath = PATH_site . 'uploads/pics/' . $fileName;
-				$image = imagecreatefromstring($ldapUser[$ldapAttribute][0]);
+				$image = imagecreatefromstring($value);
 				$imageSaveSuccess = imagejpeg($image, $imageFilePath);
 				if ($imageSaveSuccess) $typo3UserData[$typo3FieldName] = $fileName;
+			} else if ($mapping->getIsDatetime()) {
+				// date fields
+				$typo3UserData[$typo3FieldName] = strtotime($value);
+			} else {
+				// text fields
+				$typo3UserData[$typo3FieldName] = $value; // use value of $ldapFieldName if field in $ldapUser doesn't exist
 			}
 		}
 

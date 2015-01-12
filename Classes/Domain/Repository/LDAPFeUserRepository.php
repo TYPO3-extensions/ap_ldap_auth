@@ -2,8 +2,8 @@
 namespace AP\ApLdapAuth\Domain\Repository;
 
 use AP\ApLdap\Exception\LDAPException,
-	TYPO3\CMS\Core\Utility\GeneralUtility;
-use AP\ApLdapAuth\Utility\LDAPConfigUtility;
+	TYPO3\CMS\Core\Utility\GeneralUtility,
+	AP\ApLdapAuth\Utility\LDAPConfigUtility;
 
 /**
  * Repository for LDAP frontend users
@@ -13,6 +13,60 @@ use AP\ApLdapAuth\Utility\LDAPConfigUtility;
  * @author Alexander Pankow <info@alexander-pankow.de>
  */
 class LDAPFEUserRepository extends \AP\ApLdapAuth\Persistence\LdapRepository {
+
+	/**
+	 * @param int $configId
+	 * @param string $filter
+	 * @return array
+	 */
+	public function getAllUsers($configId = 0, $filter = '') {
+		if ($configId > 0)
+			$ldapConnections =  array($this->getLDAPConnection($configId));
+		else
+			$ldapConnections = $this->getLDAPConnections();
+
+		$users = array();
+		foreach ($ldapConnections as $ldapConnection) {
+			if (empty($filter))
+				$filter = str_replace('<username>', '*', $ldapConnection->getConfig()->getFeUsersFilter());
+			$baseDn = $ldapConnection->getConfig()->getFeUsersBaseDn();
+			$search = $ldapConnection->search($baseDn, $filter);
+			while ($entry = $search->getNextEntry()) {
+				$dn = $entry->getDN();
+				foreach ($entry->getAttributes() as $attribute) {
+					$users[$dn][$attribute] = $entry->getValues($attribute);
+				}
+			}
+		}
+
+		return $users;
+	}
+
+	/**
+	 * @param string $dn
+	 * @param int $configId
+	 * @return array|boolean
+	 */
+	public function getUserByDn($dn, $configId = 0) {
+		if ($configId > 0)
+			$ldapConnections =  array($this->getLDAPConnection($configId));
+		else
+			$ldapConnections = $this->getLDAPConnections();
+
+		$user = false;
+		foreach ($ldapConnections as $ldapConnection) {
+			try {
+				$entry = $ldapConnection->search($dn, '(objectClass=cosdayUser)')->getFirstEntry();
+			} catch (LDAPException $e) {
+				continue;
+			}
+
+			foreach ($entry->getAttributes() as $attribute)
+				$user[$attribute] = $entry->getValues($attribute);
+		}
+
+		return $user;
+	}
 
 	/**
 	 * Check if user exists
@@ -32,17 +86,14 @@ class LDAPFEUserRepository extends \AP\ApLdapAuth\Persistence\LdapRepository {
 			if ($search->countEntries() > 0) {
 				$entry = $search->getLastEntry();
 				$ldapUser = array();
-				foreach ($search->getAttributes() as $attribute => $values) {
-					if ($values['count'] <= 0)
-						continue;
-
+				foreach ($search->getAttributes() as $attribute) {
+					$attribute = strtolower($attribute);
 					$imageField = LDAPConfigUtility::getImageAttribute($ldapConnection->getConfig()->getFeUsersMapping());
-					foreach ($values as $key => $value) {
-						if (empty($imageField) || $attribute != $imageField)
-							$ldapUser[$attribute][$key] = $value;
-						else if (!isset($ldapUser[$attribute]))
-							$ldapUser[$attribute] = $search->getBinaryValues($attribute);
-					}
+
+					if (empty($imageField) || $attribute != $imageField)
+						$ldapUser[$attribute] = $search->getValues($attribute);
+					else if (!isset($ldapUser[$attribute]))
+						$ldapUser[$attribute] = $search->getBinaryValues($attribute);
 				}
 				$ldapUser['dn'] = $username = $search->getDN($entry);
 				try {
